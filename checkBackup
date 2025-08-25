@@ -1,0 +1,28 @@
+#!/bin/bash
+# Check if a substring argument is provided
+if [ -z "$1" ]; then
+    echo "Usage: $0 <substring>"
+    exit 1
+fi
+
+# Define the substring to search for in directory names
+substring="$1"
+
+# Find directories containing the specified substring within the current directory and subdirectories
+find . -mindepth 2 -maxdepth 2 -type d -name "*$substring*" | while read -r dir; do
+    # Print a header for each directory
+    echo "==========================================="
+    echo "Directory: $dir"
+    echo "==========================================="
+
+    # Run the `du -sh * | sort -h` command inside each found directory
+    (cd "$dir" && for item in *; do
+        if [ -e "$item" ]; then
+            size=$(du -sh "$item" 2>/dev/null | cut -f1)
+            date=$(stat -c %y "$item" | cut -d' ' -f1,2)
+            printf "%-80s %-10s %s\n" "$dir/$item" "$size" "$date"
+        fi
+    done)
+
+    echo ""
+done
