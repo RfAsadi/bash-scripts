@@ -1,0 +1,67 @@
+#!/bin/bash
+# Combined script: Export primary domains and group by registrar-level NS + HTTP status
+
+# Get the directory where this script resides
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# File paths relative to the script
+PRIMARY_OUTPUT="$DIR/Domains.txt"
+RESULT_OUTPUT="$DIR/Results.txt"
+
+# -------------------------------
+# Phase 1: Gather all primary domains on WHM/cPanel server
+# -------------------------------
+> "$PRIMARY_OUTPUT"
+
+echo "Extracting primary domains from /etc/trueuserdomains ..."
+
+while IFS=: read -r domain user; do
+    domain=$(echo "$domain" | tr -d ' ')
+    user=$(echo "$user" | tr -d ' ')
+    echo "$domain,$user" >> "$PRIMARY_OUTPUT"
+done < /etc/trueuserdomains
+
+echo "Primary domains exported to $PRIMARY_OUTPUT"
+
+# -------------------------------
+# Phase 2: Group domains by parent authoritative NS + HTTP status
+# -------------------------------
+> "$RESULT_OUTPUT"
+
+declare -A ns_groups
+
+echo "Processing NS and HTTP status for each domain ..."
+
+while IFS=',' read -r domain user; do
+    echo "Checking $domain ..."
+
+    # Query registrar-level NS using trace
+    ns=$(dig +trace NS "$domain" 2>/dev/null | awk -v d="$domain" '
+        $4=="NS" {
+            gsub(/\.$/,"",$1)
+            gsub(/\.$/,"",d)
+            if(tolower($1)==tolower(d)) print $5
+        }' | head -n 2 | sort -u | tr '\n' ' ')
+
+    if [ -z "$ns" ]; then
+        ns="UNKNOWN"
+    fi
+
+    # Get HTTP status code (try http first, fallback to https)
+    status=$(curl -o /dev/null -s -w "%{http_code}" "http://$domain" --max-time 10)
+    if [ "$status" == "000" ]; then
+        status=$(curl -o /dev/null -s -w "%{http_code}" "https://$domain" --max-time 10)
+    fi
+
+    # Append domain + user + status code to the NS group
+    ns_groups["$ns"]+="$domain ($user) [HTTP:$status]\n"
+done < "$PRIMARY_OUTPUT"
+
+# Write grouped output
+for nsset in "${!ns_groups[@]}"; do
+    echo "=== $nsset ===" >> "$RESULT_OUTPUT"
+    echo -e "${ns_groups[$nsset]}" >> "$RESULT_OUTPUT"
+    echo "" >> "$RESULT_OUTPUT"
+done
+
+echo "Results saved in $RESULT_OUTPUT"
