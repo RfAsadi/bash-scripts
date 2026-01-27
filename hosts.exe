@@ -1,0 +1,14 @@
+# Simple Prompt for IP and Domain
+$ip = Read-Host "Enter Target IP"
+$domain = Read-Host "Enter Domain Name"
+
+# Logic to edit hosts file
+$path = "C:\Windows\System32\drivers\etc\hosts"
+Add-Content -Path $path -Value "`n$ip`t$domain"
+
+# Flush DNS and Open Chrome
+ipconfig /flushdns
+start chrome "http://$domain"
+
+Write-Host "Success! Hosts file updated and Chrome launched." -ForegroundColor Green
+Start-Sleep -Seconds 3
