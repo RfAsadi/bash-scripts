@@ -8,7 +8,7 @@ fi
 
 # Dependency check
 if ! command -v w3m &> /dev/null; then
-    echo "Error: w3m is not installed. Please install it first."
+    echo "Error: w3m is not installed. Please install it first. apt/dnf install w3m"
     exit 1
 fi
 
