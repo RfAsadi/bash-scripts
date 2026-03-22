@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# Ensure script runs as root
+if [[ $EUID -ne 0 ]]; then
+   echo "Error: This script must be run as root (sudo)."
+   exit 1
+fi
+
+# Dependency check
+if ! command -v w3m &> /dev/null; then
+    echo "Error: w3m is not installed. Please install it first."
+    exit 1
+fi
+
+# Variables
+HOSTS_FILE="/etc/hosts"
+BACKUP_FILE="/etc/hosts.bak.$(date +%F_%H%M%S)"
+TAG="# STAGING_TEMP_ENTRY"
+
+# Cleanup function
+cleanup() {
+    echo -e "\nRestoring $HOSTS_FILE..."
+    if grep -q "$TAG" "$HOSTS_FILE"; then
+        sed -i "/$TAG/d" "$HOSTS_FILE"
+    fi
+    [[ -f "$BACKUP_FILE" ]] && rm -f "$BACKUP_FILE"
+    echo "Cleanup complete. Exiting."
+    exit
+}
+
+# Trap common exit signals
+trap cleanup SIGINT SIGTERM SIGHUP
+
+# 1. Input Loop (Handles typos/changes before file edit)
+while true; do
+    clear
+    echo "--- Configuration ---"
+    
+    # IP Input
+    if [[ -z "$ip_addr" ]]; then
+        read -p "Enter Server IP: " ip_addr
+        until [[ $ip_addr =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; do
+            read -p "Invalid IP format. Enter Server IP: " ip_addr
+        done
+    else
+        echo "1) IP Address: $ip_addr"
+    fi
+
+    # Domain Input
+    if [[ -z "$domain_name" ]]; then
+        read -p "Enter Domain (e.g. example.com): " domain_name
+        until [[ $domain_name =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; do
+            read -p "Invalid Domain format. Enter Domain: " domain_name
+        done
+    else
+        echo "2) Domain:     $domain_name"
+    fi
+
+    echo "---------------------"
+    echo "c) Confirm and Proceed"
+    echo "e) Edit details (reset)"
+    echo "q) Quit"
+    read -p "Choice: " menu_choice
+
+    case $menu_choice in
+        [Cc]* ) break ;;
+        [Ee]* ) ip_addr=""; domain_name=""; continue ;;
+        [Qq]* ) exit 0 ;;
+        * ) echo "Invalid choice." ; sleep 1 ;;
+    esac
+done
+
+# 2. Securely update /etc/hosts
+# Pre-clean just in case a previous session crashed without cleaning
+sed -i "/$TAG/d" "$HOSTS_FILE"
+
+cp "$HOSTS_FILE" "$BACKUP_FILE"
+host_entry="$ip_addr $domain_name www.$domain_name $TAG"
+echo "$host_entry" >> "$HOSTS_FILE"
+echo "Staging entry added to $HOSTS_FILE."
+
+current_url="https://$domain_name"
+
+while true; do
+    # 4. URL Confirmation
+    echo -e "\n----------------------------"
+    echo "Current Staging URL: $current_url"
+    read -p "Press Enter to use this, or type new URL: " input_url
+    [[ -n "$input_url" ]] && current_url=$input_url
+
+    # 5. Guide & Launch
+    echo -e "\n--- w3m STAGING VIEW ---"
+    echo " NAVIGATION:"
+    echo " - Arrows: Move | Enter: Link | B: Back"
+    echo " EXIT:"
+    echo " - Press 'q' then 'y'"
+    echo "----------------------------"
+    read -n 1 -s -r -p "Press any key to launch w3m..."
+    echo ""
+
+    w3m "$current_url"
+
+    # 6. Loop or Exit
+    echo -e "\nSession paused."
+    echo "Options: [r] Refresh/Edit URL | [c] Change IP/Domain (Remounts hosts) | [q] Quit"
+    read -p "Selection: " choice
+    
+    if [[ "$choice" == "c" ]]; then
+        # Remove current entry before looping back to main config
+        sed -i "/$TAG/d" "$HOSTS_FILE"
+        ip_addr=""
+        domain_name=""
+        # This will jump back to the top-level logic if we wrapped it, 
+        # but for simplicity in this script, we'll just restart the config section
+        exec "$0" 
+    elif [[ "$choice" != "r" ]]; then
+        break
+    fi
+done
+
+cleanup
